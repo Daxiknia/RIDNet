@@ -7,28 +7,26 @@ import collections
 import torch
 import torch.multiprocessing as multiprocessing
 
-#from torch._C import _set_worker_signal_handlers, _update_worker_pids, \
-#    _remove_worker_pids, _error_if_any_worker_fails
+from torch._C import _set_worker_signal_handlers
+#_update_worker_pids, _remove_worker_pids, _error_if_any_worker_fails
+from torch.utils.data import _utils
+from torch.utils.data import DataLoader
+#from torch.utils.data.dataloader import _BaseDataLoaderIter as _DataLoaderIter
+from torch.utils.data.dataloader import _MultiProcessingDataLoaderIter as _DataLoaderIter
 #from torch.utils.data.dataloader import DataLoader
 #from torch.utils.data.dataloader import _DataLoaderIter
 
-# from torch.utils.data.dataloader import ExceptionWrapper
-# from torch.utils.data.dataloader import _use_shared_memory
-# from torch.utils.data.dataloader import _worker_manager_loop
-# from torch.utils.data.dataloader import numpy_type_map
-# from torch.utils.data.dataloader import default_collate
-# from torch.utils.data.dataloader import pin_memory_batch
-# from torch.utils.data.dataloader import _SIGCHLD_handler_set
-# from torch.utils.data.dataloader import _set_SIGCHLD_handler
+#from torch.utils.data.dataloader import ExceptionWrapper
+#from torch.utils.data.dataloader import _use_shared_memory
+#from torch.utils.data.dataloader import _worker_manager_loop
+#from torch.utils.data.dataloader import numpy_type_map
+#from torch.utils.data.dataloader import default_collate
+#from torch.utils.data.dataloader import pin_memory_batch
+#from torch.utils.data.dataloader import _SIGCHLD_handler_set
+#from torch.utils.data.dataloader import _set_SIGCHLD_handler
+from torch.utils.data._utils.pin_memory import _pin_memory_loop
 
-
-from torch._C import _set_worker_signal_handlers
-from torch.utils.data import _utils
-from torch.utils.data.dataloader import DataLoader
-from torch.utils.data.dataloader import _DataLoaderIter
- 
 _use_shared_memory = False
-
 
 if sys.version_info[0] == 2:
     import Queue as queue
@@ -71,8 +69,9 @@ class _MSDataLoaderIter(_DataLoaderIter):
         self.pin_memory = loader.pin_memory and torch.cuda.is_available()
         self.timeout = loader.timeout
         self.done_event = threading.Event()
-
-        self.sample_iter = iter(self.batch_sampler)
+        
+        self._index_sampler = loader._index_sampler
+        self._sampler_iter = iter(self._index_sampler)
 
         if self.num_workers > 0:
             self.worker_init_fn = loader.worker_init_fn
@@ -80,6 +79,7 @@ class _MSDataLoaderIter(_DataLoaderIter):
                 multiprocessing.Queue() for _ in range(self.num_workers)
             ]
             self.worker_queue_idx = 0
+            #self.worker_result_queue = multiprocessing.SimpleQueue()
             self.worker_result_queue = multiprocessing.Queue()
             self.batches_outstanding = 0
             self.worker_pids_set = False
@@ -112,8 +112,14 @@ class _MSDataLoaderIter(_DataLoaderIter):
                 else:
                     # do not initialize cuda context if not necessary
                     maybe_device_id = None
+                #self.worker_manager_thread = threading.Thread(
+                #    target=_worker_manager_loop,
+                #    args=(self.worker_result_queue, self.data_queue, self.done_event, self.pin_memory,
+                #          maybe_device_id))
+                #self.worker_manager_thread.daemon = True
+                #self.worker_manager_thread.start()
                 self.pin_memory_thread = threading.Thread(
-                    target=_utils.pin_memory._pin_memory_loop,
+                    target=_pin_memory_loop,
                     args=(self.worker_result_queue, self.data_queue, maybe_device_id, self.done_event))
                 self.pin_memory_thread.daemon = True
                 self.pin_memory_thread.start()
@@ -124,22 +130,26 @@ class _MSDataLoaderIter(_DataLoaderIter):
                 w.daemon = True  # ensure that the worker exits on process exit
                 w.start()
 
-            # _update_worker_pids(id(self), tuple(w.pid for w in self.workers))
-            # _set_SIGCHLD_handler()
-
+            #_update_worker_pids(id(self), tuple(w.pid for w in self.workers))
+            #_set_SIGCHLD_handler()
             _utils.signal_handling._set_worker_pids(id(self), tuple(w.pid for w in self.workers))
             _utils.signal_handling._set_SIGCHLD_handler()
+            
             self.worker_pids_set = True
-
+            self._reset(loader, first_iter=True)
+            
             # prime the prefetch loop
-            for _ in range(2 * self.num_workers):
-                self._put_indices()
+            #for _ in range(2 * self.num_workers):
+                #print('\nself.type', dir(self))
+                #self._try_put_index()
 
 class MSDataLoader(DataLoader):
     def __init__(
         self, args, dataset, batch_size=1, shuffle=False,
         sampler=None, batch_sampler=None,
-        collate_fn=_utils.collate.default_collate, pin_memory=False, drop_last=False,
+        #collate_fn=default_collate, 
+        collate_fn=_utils.collate.default_collate,
+        pin_memory=False, drop_last=False,
         timeout=0, worker_init_fn=None):
 
         super(MSDataLoader, self).__init__(
