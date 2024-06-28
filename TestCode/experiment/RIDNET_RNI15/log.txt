@@ -179,3 +179,13 @@ Evaluation:
 [MyImage x1]	PSNR: 0.000 (Best: 0.000 @epoch 1)
 Total time: 2.62s
 
+
+Evaluation:
+[MyImage x1]	PSNR: 0.000 (Best: 0.000 @epoch 1)
+Total time: 2.50s
+
+
+Evaluation:
+[MyImage x1]	PSNR: 0.000 (Best: 0.000 @epoch 1)
+Total time: 2.32s
+
